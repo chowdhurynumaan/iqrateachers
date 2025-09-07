@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher's Student List</title>
+    <!-- Use Inter font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .toggle-button {
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .toggle-button.present {
+            background-color: #10B981;
+            box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+        }
+
+        .toggle-button.absent {
+            background-color: #EF4444;
+            box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-3xl shadow-lg w-full max-w-2xl transform transition-transform duration-500 ease-in-out">
+        <div class="flex items-center justify-between mb-2">
+            <h1 class="text-3xl font-bold text-gray-800">Student Roster</h1>
+            <div id="statusMessage" class="hidden text-sm font-medium text-green-600 bg-green-100 py-1 px-3 rounded-full transition-opacity duration-300 opacity-0"></div>
+        </div>
+
+        <p class="text-gray-500 mb-6">
+            Add, update, and track your students in real-time.
+        </p>
+
+        <!-- User ID Display -->
+        <p id="userIdDisplay" class="text-xs text-gray-400 text-right mb-4 overflow-hidden text-ellipsis whitespace-nowrap">User ID: Loading...</p>
+
+        <!-- Add Student Form -->
+        <form id="addStudentForm" class="flex flex-col sm:flex-row gap-4 mb-8">
+            <input type="text" id="studentNameInput" placeholder="Enter student's name" required class="flex-grow p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-blue-500 transition-colors duration-200">
+            <button type="submit" class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                Add Student
+            </button>
+        </form>
+
+        <!-- Student List -->
+        <div id="studentListContainer" class="flex flex-col gap-4">
+            <p id="loadingState" class="text-center text-gray-500">Loading students...</p>
+        </div>
+    </div>
+
+    <!-- Firebase CDN scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        
+        // Set Firebase logging level to debug
+        setLogLevel('debug');
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // UI elements
+        const addStudentForm = document.getElementById('addStudentForm');
+        const studentNameInput = document.getElementById('studentNameInput');
+        const studentListContainer = document.getElementById('studentListContainer');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Show a temporary status message
+        function showStatus(message, isError = false) {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('hidden', 'opacity-0', 'bg-green-100', 'text-green-600', 'bg-red-100', 'text-red-600');
+            statusMessage.classList.add('opacity-100', isError ? 'bg-red-100' : 'bg-green-100', isError ? 'text-red-600' : 'text-green-600');
+            setTimeout(() => {
+                statusMessage.classList.remove('opacity-100');
+                statusMessage.classList.add('opacity-0');
+            }, 3000);
+        }
+
+        // --- Authentication ---
+        let userId = null;
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                userIdDisplay.textContent = `User ID: ${userId}`;
+                showStatus("Successfully authenticated!");
+                setupFirestoreListener(userId);
+            } else {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Error during authentication:", error);
+                    userIdDisplay.textContent = "Authentication Failed";
+                    showStatus("Authentication failed. Check the console for details.", true);
+                }
+            }
+        });
+
+        // --- Firestore Real-time Listener ---
+        function setupFirestoreListener(currentUserId) {
+            const studentsCollectionRef = collection(db, `artifacts/${appId}/users/${currentUserId}/students`);
+            
+            // onSnapshot listens for real-time updates
+            onSnapshot(studentsCollectionRef, (snapshot) => {
+                const students = [];
+                snapshot.forEach(doc => {
+                    students.push({ id: doc.id, ...doc.data() });
+                });
+                renderStudentList(students);
+            }, (error) => {
+                console.error("Error listening to Firestore changes:", error);
+                studentListContainer.innerHTML = '<p class="text-center text-red-500">Failed to load students. Please try again later.</p>';
+            });
+        }
+
+        // --- UI Rendering ---
+        function renderStudentList(students) {
+            studentListContainer.innerHTML = ''; // Clear the list
+            if (students.length === 0) {
+                studentListContainer.innerHTML = '<p id="emptyState" class="text-center text-gray-500">No students added yet.</p>';
+                return;
+            }
+            students.forEach(student => {
+                const studentCard = document.createElement('div');
+                studentCard.dataset.id = student.id;
+                studentCard.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md';
+
+                const nameAndStatus = document.createElement('div');
+                nameAndStatus.className = 'flex items-center gap-4';
+
+                // Status toggle button
+                const statusButton = document.createElement('button');
+                statusButton.className = `toggle-button w-12 h-6 rounded-full relative ${student.isPresent ? 'present' : 'absent'}`;
+                statusButton.innerHTML = `<div class="absolute w-5 h-5 bg-white rounded-full top-0.5 transform transition-transform duration-300 ${student.isPresent ? 'translate-x-6' : 'translate-x-0.5'}"></div>`;
+                statusButton.dataset.isPresent = student.isPresent;
+                statusButton.addEventListener('click', () => toggleStudentStatus(student.id, !student.isPresent));
+
+                const studentName = document.createElement('span');
+                studentName.textContent = student.name;
+                studentName.className = 'text-gray-700 font-medium';
+
+                nameAndStatus.appendChild(statusButton);
+                nameAndStatus.appendChild(studentName);
+
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'text-gray-400 hover:text-red-500 transition-colors duration-200';
+                deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.013 21H7.987a2 2 0 01-1.92-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                          </svg>`;
+                deleteButton.addEventListener('click', () => deleteStudent(student.id));
+
+                studentCard.appendChild(nameAndStatus);
+                studentCard.appendChild(deleteButton);
+
+                studentListContainer.appendChild(studentCard);
+            });
+        }
+
+        // --- Firestore Functions ---
+        async function addStudent(name) {
+            if (!userId) return showStatus("Authentication in progress. Please wait.", true);
+            const studentsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/students`);
+            try {
+                const newDocRef = await addDoc(studentsCollectionRef, {
+                    name,
+                    isPresent: true,
+                    createdAt: new Date()
+                });
+                showStatus("Student added successfully!");
+                console.log("New student added with ID:", newDocRef.id);
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                showStatus("Error adding student.", true);
+            }
+        }
+
+        async function deleteStudent(studentId) {
+            if (!userId) return showStatus("Authentication in progress. Please wait.", true);
+            const studentDocRef = doc(db, `artifacts/${appId}/users/${userId}/students`, studentId);
+            try {
+                await deleteDoc(studentDocRef);
+                showStatus("Student removed successfully!");
+            } catch (e) {
+                console.error("Error removing document: ", e);
+                showStatus("Error removing student.", true);
+            }
+        }
+
+        async function toggleStudentStatus(studentId, isPresent) {
+            if (!userId) return showStatus("Authentication in progress. Please wait.", true);
+            const studentDocRef = doc(db, `artifacts/${appId}/users/${userId}/students`, studentId);
+            try {
+                await updateDoc(studentDocRef, {
+                    isPresent: isPresent
+                });
+            } catch (e) {
+                console.error("Error updating document: ", e);
+                showStatus("Error updating student status.", true);
+            }
+        }
+
+        // --- Event Listeners ---
+        addStudentForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const studentName = studentNameInput.value.trim();
+            if (studentName) {
+                addStudent(studentName);
+                studentNameInput.value = ''; // Clear input field
+            }
+        });
+    </script>
+</body>
+</html>
