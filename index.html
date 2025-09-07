@@ -44,7 +44,7 @@
         </p>
 
         <!-- User ID Display -->
-        <p id="userIdDisplay" class="text-xs text-gray-400 text-right mb-4 overflow-hidden text-ellipsis whitespace-nowrap">User ID: Loading...</p>
+        <p id="userIdDisplay" class="text-xs text-gray-400 text-right mb-4 overflow-hidden text-ellipsis whitespace-nowrap">Session ID: Loading...</p>
 
         <!-- Add Student Form -->
         <form id="addStudentForm" class="flex flex-col sm:flex-row gap-4 mb-8">
@@ -63,17 +63,22 @@
     <!-- Firebase CDN scripts -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         
         // Set Firebase logging level to debug
         setLogLevel('debug');
 
-        // Global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // IMPORTANT: Replace these placeholder values with your own Firebase project's config.
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
 
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
@@ -103,18 +108,14 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 userId = user.uid;
-                userIdDisplay.textContent = `User ID: ${userId}`;
+                userIdDisplay.textContent = `Session ID: ${userId}`;
                 showStatus("Successfully authenticated!");
                 setupFirestoreListener(userId);
             } else {
                 try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
+                    await signInAnonymously(auth);
                 } catch (error) {
-                    console.error("Error during authentication:", error);
+                    console.error("Error during anonymous authentication:", error);
                     userIdDisplay.textContent = "Authentication Failed";
                     showStatus("Authentication failed. Check the console for details.", true);
                 }
@@ -123,7 +124,7 @@
 
         // --- Firestore Real-time Listener ---
         function setupFirestoreListener(currentUserId) {
-            const studentsCollectionRef = collection(db, `artifacts/${appId}/users/${currentUserId}/students`);
+            const studentsCollectionRef = collection(db, `users/${currentUserId}/students`);
             
             // onSnapshot listens for real-time updates
             onSnapshot(studentsCollectionRef, (snapshot) => {
@@ -184,7 +185,7 @@
         // --- Firestore Functions ---
         async function addStudent(name) {
             if (!userId) return showStatus("Authentication in progress. Please wait.", true);
-            const studentsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/students`);
+            const studentsCollectionRef = collection(db, `users/${userId}/students`);
             try {
                 const newDocRef = await addDoc(studentsCollectionRef, {
                     name,
@@ -201,7 +202,7 @@
 
         async function deleteStudent(studentId) {
             if (!userId) return showStatus("Authentication in progress. Please wait.", true);
-            const studentDocRef = doc(db, `artifacts/${appId}/users/${userId}/students`, studentId);
+            const studentDocRef = doc(db, `users/${userId}/students`, studentId);
             try {
                 await deleteDoc(studentDocRef);
                 showStatus("Student removed successfully!");
@@ -213,7 +214,7 @@
 
         async function toggleStudentStatus(studentId, isPresent) {
             if (!userId) return showStatus("Authentication in progress. Please wait.", true);
-            const studentDocRef = doc(db, `artifacts/${appId}/users/${userId}/students`, studentId);
+            const studentDocRef = doc(db, `users/${userId}/students`, studentId);
             try {
                 await updateDoc(studentDocRef, {
                     isPresent: isPresent
